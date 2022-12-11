@@ -44,11 +44,14 @@ class Vgg16(nn.Module):
         return out
 
 class Percept_Loss(nn.Module):
-    def __init__(self, memory_constraint: float):
+    def __init__(self, memory_constraint: float, use_cuda=False):
         super(Percept_Loss, self).__init__()
         print('notice: changed layers in perceptual back to old version')
         self.memory_constraint = memory_constraint
         self.vgg = Vgg16()
+        if use_cuda:
+            self.vgg.cuda()
+
         self.loss = nn.MSELoss()
 
     def forward(self, input, target):
