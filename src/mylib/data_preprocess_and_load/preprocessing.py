@@ -1,4 +1,3 @@
-#preprocessing from other group
 import os
 import numpy as np
 import nibabel as nib
