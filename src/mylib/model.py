@@ -4,7 +4,8 @@ import torch
 from transformers import BertConfig,BertPreTrainedModel, BertModel
 from datetime import datetime
 import torch.nn as nn
-from nvidia_blocks import *
+# from nvidia_blocks import *
+#from vtn import VTN
 
 
 class BaseModel(nn.Module, ABC):
@@ -60,8 +61,6 @@ class BaseModel(nn.Module, ABC):
         self.shapes = kwargs.get('shapes')
 
 
-
-
     def load_partial_state_dict(self, state_dict,load_cls_embedding):
         print('loading parameters onto new model...')
         own_state = self.state_dict()
@@ -83,7 +82,7 @@ class BaseModel(nn.Module, ABC):
                 print('notice: named parameter - {} is randomly initialized'.format(name))
 
 
-    def save_checkpoint(self, directory, title, epoch, loss,accuracy, optimizer=None,schedule=None):
+    def save_checkpoint(self, directory, title, epoch, optimizer=None,schedule=None):
         # Create directory to save to
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -92,10 +91,8 @@ class BaseModel(nn.Module, ABC):
         ckpt_dict = {
             'model_state_dict':self.state_dict(),
             'optimizer_state_dict':optimizer.state_dict() if optimizer is not None else None,
-            'epoch':epoch,
-            'loss_value':loss}
-        if accuracy is not None:
-            ckpt_dict['accuracy'] = accuracy
+            'epoch':epoch}
+
         if schedule is not None:
             ckpt_dict['schedule_state_dict'] = schedule.state_dict()
             ckpt_dict['lr'] = schedule.get_last_lr()[0]
@@ -309,28 +306,62 @@ class Encoder_Transformer_Decoder(BaseModel):
         return {'reconstructed_fmri_sequence': reconstructed_image}
 
 
-class Encoder_Transformer_finetune(BaseModel):
-    def __init__(self,dim,**kwargs):
-        super(Encoder_Transformer_finetune, self).__init__()
-        self.task = kwargs.get('fine_tune_task')
+class BottleNeck_out_VAE(BaseModel):
+    def __init__(self,**kwargs):
+        super(BottleNeck_out_VAE, self).__init__()
+        self.register_vars(**kwargs)
+        self.flat_factor = tuple_prod(self.shapes['dim_3'])
+        minicube_shape = (self.model_depth // 2,) + self.shapes['dim_3']
+        self.out_of_bert = nn.Linear(in_features=self.intermediate_vec, out_features=(self.model_depth // 2) * self.flat_factor)
+        self.out_of_bert_2 = nn.Linear(in_features=self.intermediate_vec, out_features=(self.model_depth // 2) * self.flat_factor)
+
+        self.expand_dimension = nn.Sequential(OrderedDict([
+            ('unflatten', nn.Unflatten(1, minicube_shape)),
+            ('group_normR', nn.GroupNorm(num_channels=self.model_depth // 2, num_groups=2)),
+            # ('norm0', nn.BatchNorm3d(model_depth * 8)),
+            ('reluR0', nn.LeakyReLU(inplace=True)),
+            ('convR0', nn.Conv3d(self.model_depth // 2, self.model_depth * 8, kernel_size=(3, 3, 3), stride=1, padding=1)),
+        ]))
+
+    def prior(self, n):
+        # ====
+        # return n samples from prior distribution (we use standart normal for prior)
+        # ====
+        z = torch.distributions.Normal(0., 1.).sample((n, (self.model_depth // 2) * self.flat_factor))
+        if self.cuda:
+            z = z.cuda()
+        return z
+
+    def forward(self, x):
+        mean = self.out_of_bert(x)
+        log_std = self.out_of_bert_2(x)
+        #log_std = torch.zeros(mean.shape).cuda()
+
+        x = self.prior(len(mean)) * torch.exp(log_std) + mean
+
+        return self.expand_dimension(x), mean, log_std
+
+class Encoder_Transformer_Decoder_VAE(BaseModel):
+    def __init__(self, dim,**kwargs):
+        super(Encoder_Transformer_Decoder_VAE, self).__init__()
+        self.task = 'vae_reconstruction'
         self.register_vars(**kwargs)
         # ENCODING
         self.encoder = Encoder(**kwargs)
-        self.determine_shapes(self.encoder, dim)
+        self.determine_shapes(self.encoder,dim)
         kwargs['shapes'] = self.shapes
+        
         # BottleNeck into bert
         self.into_bert = BottleNeck_in(**kwargs)
 
         # transformer
-        self.transformer = Transformer_Block(self.BertConfig,**kwargs)
-        # finetune classifier
-        if kwargs.get('fine_tune_task') == 'regression':
-            self.final_activation_func = nn.LeakyReLU()
-        elif kwargs.get('fine_tune_task') == 'binary_classification':
-            self.final_activation_func = nn.Sigmoid()
-            self.label_num = 1
-        self.regression_head = nn.Sequential(nn.Linear(self.BertConfig.hidden_size, self.label_num),self.final_activation_func)
+        self.transformer = Transformer_Block(self.BertConfig, **kwargs)
 
+        # BottleNeck out of bert
+        self.from_bert = BottleNeck_out_VAE(**kwargs)
+
+        # DECODER
+        self.decoder = Decoder(**kwargs)
 
     def forward(self, x):
         batch_size, inChannels, W, H, D, T = x.shape
@@ -339,6 +370,79 @@ class Encoder_Transformer_finetune(BaseModel):
         encoded = self.into_bert(encoded)
         encoded = encoded.reshape(batch_size, T, -1)
         transformer_dict = self.transformer(encoded)
-        CLS = transformer_dict['cls']
-        prediction = self.regression_head(CLS)
-        return {self.task:prediction}
+        out = transformer_dict['sequence'].reshape(batch_size * T, -1)
+
+        out, mean, log_std = self.from_bert(out)
+
+        reconstructed_image = self.decoder(out)
+        reconstructed_image = reconstructed_image.reshape(batch_size, T, self.outChannels, W, H, D).permute(0, 2, 3, 4, 5, 1)
+        return {'reconstructed_fmri_sequence': reconstructed_image, 'mean_1':mean, 'log_std_1':log_std}
+
+class VAE_with_VTN(BaseModel):
+    def __init__(self, dim,**kwargs):
+        super(VAE_with_VTN, self).__init__()
+        self.task = 'vae_reconstruction'
+        self.register_vars(**kwargs)
+        self.vtn_path = kwargs.get('vtn_path')
+        # ENCODING
+        self.encoder = Encoder(**kwargs)
+        self.determine_shapes(self.encoder,dim)
+        kwargs['shapes'] = self.shapes
+        
+        # BottleNeck into bert
+        self.into_bert = BottleNeck_in(**kwargs)
+
+        # transformer
+        self.transformer = Transformer_Block(self.BertConfig, **kwargs)
+
+        # BottleNeck out of bert
+        self.from_bert = BottleNeck_out_VAE(**kwargs)
+
+        # DECODER
+        self.decoder = Decoder(**kwargs)
+
+        #VTN
+        self.vtn = VTN((self.from_bert.model_depth // 2) * self.from_bert.flat_factor, vtn_path=self.vtn_path)
+
+    def forward(self, input_dict):
+        x = input_dict['fmri_seq']
+        x_0 = input_dict['fmri_img']
+        video = input_dict['video_seq']
+        pos_idx = input_dict['pos_idx']
+        #vae 
+        batch_size, inChannels, W, H, D, T = x.shape
+        x = x.permute(0, 5, 1, 2, 3, 4).reshape(batch_size * T, inChannels, W, H, D)
+        encoded = self.encoder(x)
+        encoded = self.into_bert(encoded)
+        encoded = encoded.reshape(batch_size, T, -1)
+        transformer_dict = self.transformer(encoded)
+        out = transformer_dict['sequence'].reshape(batch_size * T, -1)
+
+        out, mean_1, log_std_1 = self.from_bert(out)
+
+        reconstructed_image = self.decoder(out)
+        reconstructed_image = reconstructed_image.reshape(batch_size, T, self.outChannels, W, H, D).permute(0, 2, 3, 4, 5, 1)
+
+        #previous fmri
+        #batch_size, inChannels, W, H, D, t = x_0.shape
+        assert x_0.shape[-1] == 1
+        x_0 = x_0.permute(0, 5, 1, 2, 3, 4).reshape(batch_size, inChannels, W, H, D)
+        encoded = self.encoder(x_0)
+        encoded = self.into_bert(encoded)
+        encoded = encoded.reshape(batch_size, 1, -1)
+        transformer_dict = self.transformer(encoded)
+        out = transformer_dict['sequence'].reshape(batch_size, -1)
+        _, mean_0, log_std_0 = self.from_bert(out)
+
+        #vtn
+        mean_2, log_std_2 = self.vtn((video, pos_idx)).chunk(2, dim=-1)
+
+        mean_2 = mean_2[:, 1:pos_idx.shape[-1]+1:4].reshape(batch_size * T, -1)
+        log_std_2 = log_std_2[:, 1:pos_idx.shape[-1]+1:4].reshape(batch_size * T, -1)
+        #print(mean_2.shape)
+        #print(mean_0.shape)
+        mean_2 = mean_2 + mean_0
+        log_std_2 = torch.logaddexp(log_std_0, log_std_2)
+
+        return {'reconstructed_fmri_sequence': reconstructed_image, 'mean_1':mean_1, 'log_std_1':log_std_1,
+                'mean_2':mean_2, 'log_std_2':log_std_2}
