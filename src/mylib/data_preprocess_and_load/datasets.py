@@ -76,7 +76,7 @@ class fMRIVideoDataset(Dataset):
         start_idx = self.start_times[index // len(self.subjects_data)]
         start_frame = (start_idx // 5) * 76
         end_frame = start_frame + self.num_chunks * 76
-        video = torch.stack(frames[start_frame:end_frame:self.skip_frames])
+        video = torch.stack(self.frames[start_frame:end_frame:self.skip_frames])
         position_idx = torch.arange(0, end_frame - start_frame, self.skip_frames)
 
         glob_tensors = torch.stack([torch.load(os.path.join(self.data_dir, subj_dir, 'glob_norm', f'rfMRI__TR_{start_idx + i}.pt'))
