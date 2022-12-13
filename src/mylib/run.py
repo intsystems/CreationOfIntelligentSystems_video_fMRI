@@ -1,5 +1,5 @@
 import torch
-from data_preprocess_and_load.dataset import fMRIDataset
+from data_preprocess_and_load.datasets import fMRIDataset
 from torch.utils.data import DataLoader
 
 from trainer import Trainer
@@ -19,7 +19,6 @@ def get_args():
     parser.add_argument("--perceptual_factor", default=1, type=float)
     parser.add_argument("--intensity_factor", default=1, type=float)
     parser.add_argument("--nEpochs", default=5, type=int)
-    parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--memory_constraint", default=0.1, type=float)
     parser.add_argument("--loaded_model_weights_path", default="AutoEncoder_last_epoch.pth", type=str)
     args = parser.parse_args()
