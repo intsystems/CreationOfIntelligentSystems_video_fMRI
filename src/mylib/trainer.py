@@ -100,7 +100,7 @@ class Trainer():
             for name in epoch_losses.keys():
                 epoch_losses[name].append(loss_dict[name])
 
-            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             loss.backward()
             self.optimizer.step()
             self.lr_handler.schedule_check_and_update()
