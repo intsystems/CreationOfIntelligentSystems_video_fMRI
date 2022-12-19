@@ -2,24 +2,18 @@
 Installation
 ************
 
-Requirements
-============
+Download dataset
+-------
+.. code-block:: bash
+	!aws s3 sync --no-sign-request s3://openneuro.org/ds003688 ds003688-download/
+	
 
-- Python 3.*
-- pip 20.0.2
+Normalize fMRI
+-------
+	!python mylib/data_preprocess_and_load/preprocessing.py
 
-Installing by using PyPi
-========================
 
-Install
+Train
 -------
 .. code-block:: bash
 
-	git clone https://github.com/Intelligent-Systems-Phystech/ProjectTemplate.git /tmp/ProjectTemplate
-	python3 -m pip install /tmp/ProjectTemplate/src/
-
-Uninstall
----------
-.. code-block:: bash
-
-  python3 -m pip uninstall mylib
