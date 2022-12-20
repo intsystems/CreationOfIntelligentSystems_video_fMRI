@@ -4,8 +4,9 @@ import torch
 from transformers import BertConfig,BertPreTrainedModel, BertModel
 from datetime import datetime
 import torch.nn as nn
-# from nvidia_blocks import *
-#from vtn import VTN
+from collections import OrderedDict
+from nvidia_blocks import *
+from vtn import VTN
 
 
 class BaseModel(nn.Module, ABC):
