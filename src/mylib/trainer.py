@@ -6,6 +6,7 @@ from model import Encoder_Transformer_Decoder,Encoder_Transformer_Decoder_VAE,Au
 from losses import get_intense_voxels, Percept_Loss
 from data_preprocess_and_load.datasets import fMRIVideoDataset, fMRIDataset
 from torch.utils.data import DataLoader
+import torch.nn as nn
 
 class Trainer():
     """
