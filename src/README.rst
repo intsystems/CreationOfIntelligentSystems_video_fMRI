@@ -1,6 +1,7 @@
-************
-Installation
-************
+Requirements
+-------
+
+Python 3.8.16
 
 Download dataset
 -------
