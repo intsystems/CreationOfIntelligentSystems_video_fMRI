@@ -5,7 +5,6 @@ import argparse
 from trainer import Trainer
 import os
 from pathlib import Path
-from collections import OrderedDict
 
 
 def get_arguments(base_path):
