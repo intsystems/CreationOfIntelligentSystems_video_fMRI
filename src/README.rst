@@ -8,6 +8,8 @@ Download dataset
 .. code-block:: bash
 
 	aws s3 sync --no-sign-request s3://openneuro.org/ds003688 ds003688-download/
+
+Also download video and VTN weights (link to VTN checkpoint: https://researchpublic.blob.core.windows.net/vtn/VTN_VIT_B_KINETICS.pyth)
 	
 
 Normalize fMRI
@@ -20,6 +22,8 @@ Normalize fMRI
 Train
 -------
 .. code-block:: bash
+	
+	python mylib/main.py
 	
 	
 
